@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>来場カウント（中学）</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      background-color: #f4f6f8;
+    }
+    .card {
+      background: white;
+      padding: 2rem;
+      border-radius: 16px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      text-align: center;
+      max-width: 320px;
+      width: 90%;
+    }
+    h1 { margin-top: 0; color: #333; font-size: 1.5rem; }
+    .badge-staff {
+      background-color: #ff9500;
+      color: white;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    .count-selector {
+      margin: 1.2rem 0 0.5rem;
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+    }
+    .count-btn {
+      flex: 1;
+      padding: 8px 0;
+      background: #e9ecef;
+      border: 2px solid #ced4da;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: bold;
+      cursor: pointer;
+      color: #495057;
+    }
+    .count-btn.active {
+      background: #007aff;
+      border-color: #007aff;
+      color: white;
+    }
+    #btn {
+      background-color: #007aff;
+      color: white;
+      border: none;
+      padding: 1rem 2rem;
+      font-size: 1.2rem;
+      font-weight: bold;
+      border-radius: 12px;
+      cursor: pointer;
+      width: 100%;
+      margin-top: 1rem;
+      transition: background-color 0.2s;
+    }
+    #btn:active { background-color: #0056b3; }
+    #btn:disabled { background-color: #ccc; cursor: not-allowed; }
+    #status {
+      margin-top: 1rem;
+      font-weight: bold;
+      font-size: 1rem;
+      min-height: 1.5em;
+    }
+    .notice {
+      color: #666;
+      font-size: 0.85rem;
+      margin-top: 10px;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <h1 id="title">来場カウント（中学）</h1>
+  <p id="corner-display">コーナー: 確認中...</p>
+  
+  <!-- 受付用モードの人数選択エリア（初期状態は非表示） -->
+  <div id="staff-panel" style="display: none;">
+    <p style="font-size: 0.9rem; margin-bottom: 4px; font-weight: bold; color: #555;">受付人数を選択（最大4名）</p>
+    <div class="count-selector">
+      <button class="count-btn active" onclick="selectCount(1)">1名</button>
+      <button class="count-btn" onclick="selectCount(2)">2名</button>
+      <button class="count-btn" onclick="selectCount(3)">3名</button>
+      <button class="count-btn" onclick="selectCount(4)">4名</button>
+    </div>
+  </div>
+
+  <!-- ボタン表示エリア -->
+  <div id="btn-container">
+    <button id="btn" type="button">🎉 来場しました！</button>
+  </div>
+  
+  <div id="status"></div>
+</div>
+
+<script>
+  // ★ GASのデプロイURL
+  const GAS_URL = "https://script.google.com/macros/s/AKfycbyUWA6nkUI0z4wURAurHpw9Z5LkA00nGg86L2UNnvOxtqhmcxmqLnJfoWnGB8MDp_I/exec";
+  const COOLDOWN_MINUTES = 3; // 一般用のクールダウン時間（3分）
+  let selectedCount = 1;      // 受付モード時の送信人数
+
+  // URLパラメータの確認（corner, staff）
+  const params = new URLSearchParams(window.location.search);
+  const corner = (params.get('corner') || "1a").toLowerCase();
+  const isStaff = params.get('staff') === 'true'; // ?staff=true があれば受付モード
+
+  // UUID取得または生成 (永続化)
+  function getOrCreateUUID() {
+    let uuid = localStorage.getItem('visitor_uuid');
+    if (!uuid) {
+      uuid = 'uuid_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+      localStorage.setItem('visitor_uuid', uuid);
+    }
+    return uuid;
+  }
+
+  const uuid = getOrCreateUUID();
+
+  // 画面のタイトル表示制御
+  const cornerDisplay = document.getElementById('corner-display');
+  if (isStaff) {
+    cornerDisplay.innerHTML = `コーナー: ${corner.toUpperCase()} <span class="badge-staff">受付用</span>`;
+    document.getElementById('staff-panel').style.display = 'block'; // 人数選択ボタンを表示
+  } else {
+    cornerDisplay.textContent = "コーナー: " + corner.toUpperCase();
+  }
+
+  const btn = document.getElementById('btn');
+  const statusDiv = document.getElementById('status');
+  const btnContainer = document.getElementById('btn-container');
+
+  // 人数選択ボタンの切替処理（受付モード時のみ使用）
+  function selectCount(count) {
+    selectedCount = count;
+    const buttons = document.querySelectorAll('.count-btn');
+    buttons.forEach((b, idx) => {
+      if (idx === count - 1) {
+        b.classList.add('active');
+      } else {
+        b.classList.remove('active');
+      }
+    });
+    btn.textContent = `🎉 代行受付する（${count}名）`;
+  }
+
+  // クールダウン判定（一般来場者のみチェック）
+  function checkAndApplyCooldown() {
+    if (isStaff) return false; // 受付モードならクールダウンしない
+
+    const lastVisit = localStorage.getItem(`last_visit_${corner}`);
+    if (lastVisit) {
+      const elapsedMs = Date.now() - parseInt(lastVisit, 10);
+      const cooldownMs = COOLDOWN_MINUTES * 60 * 1000;
+
+      if (elapsedMs < cooldownMs) {
+        btnContainer.innerHTML = `<div style="color: green; font-size: 1.1rem; margin-top: 15px; font-weight: bold;">✅ 受付完了済みです！</div>`;
+        statusDiv.innerHTML = `<p class="notice">※同じブースでの再登録は、3分以上経過してから再度QRコードを読み込んでください。</p>`;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // 画面読み込み時にリロード対策チェック
+  checkAndApplyCooldown();
+
+  btn.onclick = function() {
+    if (checkAndApplyCooldown()) return;
+
+    btn.disabled = true;
+    statusDiv.textContent = "送信中...";
+    statusDiv.style.color = "#333";
+
+    // 受付モード時は選択した人数、通常時は1名
+    const countToSend = isStaff ? selectedCount : 1;
+
+    const formData = new URLSearchParams();
+    formData.append("payload", JSON.stringify({
+      uuid: uuid,
+      corner: corner,
+      count: countToSend // 人数をGASへ送信
+    }));
+
+    fetch(GAS_URL, {
+      method: "POST",
+      mode: "no-cors",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: formData
+    })
+    .then(() => {
+      if (isStaff) {
+        // 受付モード：送信後にボタンを復活させ、連続受付できるようにする
+        statusDiv.textContent = `✅ ${countToSend}名 受付完了！`;
+        statusDiv.style.color = "green";
+        setTimeout(() => {
+          btn.disabled = false;
+          statusDiv.textContent = "";
+          selectCount(1); // 選択人数を1名にリセット
+        }, 1500);
+      } else {
+        // 一般モード：時刻を記録して3分間のロック表示へ切り替え
+        localStorage.setItem(`last_visit_${corner}`, Date.now().toString());
+        checkAndApplyCooldown();
+      }
+    })
+    .catch(error => {
+      console.error(error);
+      statusDiv.textContent = "❌ 通信エラー";
+      statusDiv.style.color = "red";
+      btn.disabled = false;
+    });
+  };
+</script>
+
+</body>
+</html>
