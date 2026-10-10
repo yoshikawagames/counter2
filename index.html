@@ -171,7 +171,7 @@
 
       if (elapsedMs < cooldownMs) {
         btnContainer.innerHTML = `<div style="color: green; font-size: 1.1rem; margin-top: 15px; font-weight: bold;">✅ 受付完了済みです！</div>`;
-        statusDiv.innerHTML = `<p class="notice">※同じブースでの再登録は、3分以上経過してから再度QRコードを読み込んでください。</p>`;
+        statusDiv.innerHTML = `<p class="notice">※同じブースでの再登録は、しばらく経過してから再度QRコードを読み込んでください。</p>`;
         return true;
       }
     }
